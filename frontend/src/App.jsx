@@ -1,432 +1,367 @@
 import { useEffect, useState } from "react";
 import "./index.css";
 import axios from "axios";
+
 import { createPaymentOrder } from "./services/paymentService";
 import { getMyOrders } from "./services/paymentHistoryService";
 
 function App() {
-  const [user, setUser] = useState(null);
+    const [amount, setAmount] = useState(499);
+    const [orders, setOrders] = useState([]);
+    const [loading, setLoading] = useState(false);
 
-  const handleLogout = () => {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
+    // ==========================================
+    // LOAD TRANSACTION HISTORY
+    // ==========================================
 
-  window.location.reload();
-};
+    const loadOrders = async () => {
+        try {
+            const data = await getMyOrders();
 
-  const [loading, setLoading] = useState(false);
+            setOrders(data.orders || []);
+        } catch (error) {
+            console.error(
+                "Failed to load payment history:",
+                error
+            );
+        }
+    };
 
-  // Payment amount
-  const [amount, setAmount] = useState(499);
-  
+    useEffect(() => {
+       loadOrders();
+    }, []);
 
-  // Payment history
-  const [orders, setOrders] = useState([]);
+    // ==========================================
+    // PAYMENT
+    // ==========================================
 
-  const token = localStorage.getItem("token");
+    const handlePayment = async () => {
+        try {
+            const paymentAmount = Number(amount);
 
-  // ==========================================
-  // LOAD PAYMENT HISTORY
-  // ==========================================
+            if (!paymentAmount || paymentAmount <= 0) {
+                alert("Please enter a valid amount");
+                return;
+            }
 
-  const loadOrders = async () => {
-    try {
-      if (!token) {
-        return;
-      }
+            if (paymentAmount > 100000) {
+                alert(
+                    "Maximum payment amount is ₹100,000"
+                );
+                return;
+            }
 
-      const data = await getMyOrders(token);
+            setLoading(true);
 
-      setOrders(data.orders);
-    } catch (error) {
-      console.error(
-        "Failed to load payment history:",
-        error
-      );
-    }
-  };
+            // Create Razorpay order
+            const data =
+                await createPaymentOrder(
+                    paymentAmount
+                );
 
-  useEffect(() => {
-    loadOrders();
-  }, []);
-
-  // ==========================================
-  // PAYMENT
-  // ==========================================
-
-  const handlePayment = async () => {
-    try {
-      // Convert input to number
-      const paymentAmount = Number(amount);
-
-      // Validate amount
-      if (!paymentAmount || paymentAmount <= 0) {
-        alert("Please enter a valid amount");
-        return;
-      }
-
-      // Optional maximum limit
-      if (paymentAmount > 100000) {
-        alert("Maximum payment amount is ₹100,000");
-        return;
-      }
-
-      if (!token) {
-        alert("Please login first");
-        return;
-      }
-
-      setLoading(true);
-
-      // ========================================
-      // CREATE ORDER
-      // ========================================
-
-      const data = await createPaymentOrder(
-        token,
-        paymentAmount
-      );
-
-      console.log("Order created:", data);
-
-      // ========================================
-      // RAZORPAY CHECKOUT
-      // ========================================
-
-      const options = {
-        key: data.razorpayKey,
-
-        // Convert rupees to paise
-        amount: data.order.amount * 100,
-
-        currency: data.order.currency,
-
-        name: "MiniPay",
-
-        description: "MiniPay Payment",
-
-        order_id: data.order.razorpayOrderId,
-
-        // ======================================
-        // PAYMENT SUCCESS
-        // ======================================
-
-        handler: async function (response) {
-          try {
             console.log(
-              "Payment successful:",
-              response
+                "Order created:",
+                data
             );
 
-            // ====================================
-            // VERIFY PAYMENT
-            // ====================================
+            // Razorpay Checkout
+            const options = {
+                key: data.razorpayKey,
 
-            const verifyResponse =
-              await axios.post(
-                "http://localhost:5000/api/payment/verify",
+                amount:
+                    data.order.amount * 100,
 
-                {
-                  razorpay_order_id:
-                    response.razorpay_order_id,
+                currency:
+                    data.order.currency,
 
-                  razorpay_payment_id:
-                    response.razorpay_payment_id,
+                name: "MiniPay",
 
-                  razorpay_signature:
-                    response.razorpay_signature
+                description:
+                    "MiniPay Payment",
+
+                order_id:
+                    data.order.razorpayOrderId,
+
+                handler: async function (
+                    response
+                ) {
+                    try {
+                        console.log(
+                            "Payment successful:",
+                            response
+                        );
+
+                        // Verify payment
+                        const verifyResponse =
+                            await axios.post(
+                                "http://localhost:5000/api/payment/verify",
+                                {
+                                    razorpay_order_id:
+                                        response.razorpay_order_id,
+
+                                    razorpay_payment_id:
+                                        response.razorpay_payment_id,
+
+                                    razorpay_signature:
+                                        response.razorpay_signature
+                                }
+                            );
+
+                        console.log(
+                            "Verification response:",
+                            verifyResponse.data
+                        );
+
+                        alert(
+                            "Payment successful and verified! 🎉"
+                        );
+
+                        // Refresh history
+                        loadOrders();
+
+                    } catch (error) {
+                        console.error(
+                            "Verification error:",
+                            error
+                        );
+
+                        alert(
+                            error.response
+                                ?.data?.message ||
+                            "Payment verification failed"
+                        );
+                    }
                 },
 
-                {
-                  headers: {
-                    Authorization:
-                      `Bearer ${token}`
-                  }
+                prefill: {
+                    name: "MiniPay Customer",
+                    email: "customer@example.com"
+                },
+
+                theme: {
+                    color: "#111827"
                 }
-              );
+            };
 
-            console.log(
-              "Verification response:",
-              verifyResponse.data
-            );
+            const razorpay =
+                new window.Razorpay(
+                    options
+                );
 
-            alert(
-              "Payment verified successfully! 🎉"
-            );
+            razorpay.open();
 
-            // Refresh payment history
-            loadOrders();
-
-          } catch (error) {
-
+        } catch (error) {
             console.error(
-              "Verification error:",
-              error
+                "Payment error:",
+                error
             );
 
             alert(
-              error.response?.data?.message ||
-              "Payment verification failed"
+                error.response
+                    ?.data?.message ||
+                "Failed to create payment order"
             );
-          }
-        },
 
-        // ======================================
-        // PREFILL USER INFORMATION
-        // ======================================
-
-        prefill: {
-          name: "Rohan",
-          email: "rohan@example.com"
-        },
-
-        // ======================================
-        // RAZORPAY THEME
-        // ======================================
-
-        theme: {
-          color: "#111827"
+        } finally {
+            setLoading(false);
         }
-      };
+    };
 
-      // Create Razorpay instance
-      const razorpay =
-        new window.Razorpay(options);
+    // ==========================================
+    // UI
+    // ==========================================
 
-      // Open Razorpay
-      razorpay.open();
+    return (
+        <div className="app">
 
-    } catch (error) {
+            <div className="payment-card">
 
-      console.error(
-        "Payment error:",
-        error
-      );
+                <h1>MiniPay</h1>
 
-      alert(
-        error.response?.data?.message ||
-        "Failed to create payment order"
-      );
+                <p className="subtitle">
+                    Simple & Secure Payments
+                </p>
 
-    } finally {
-      setLoading(false);
-    }
-  };
+                <div className="product">
 
+                    <div>
+                        <h2>
+                            Make a Payment
+                        </h2>
 
-  // ==========================================
-  // UI
-  // ==========================================
-
-  return (
-    <div className="app">
-
-      <div className="payment-card">
-
-        {/* ==================================
-            HEADER
-        ================================== */}
-
-
-        <div className="top-bar">
-
-  <div>
-    <strong>
-      {user ? user.name : "Guest"}
-    </strong>
-
-    {user && (
-      <p>
-        {user.email}
-      </p>
-    )}
-  </div>
-
-  {token && (
-    <button
-      className="logout-button"
-      onClick={handleLogout}
-    >
-      Logout
-    </button>
-  )}
-
-</div>
-
-        <h1>MiniPay</h1>
-
-        <p className="subtitle">
-          Simple & Secure Payments
-        </p>
-
-
-        {/* ==================================
-            AMOUNT SECTION
-        ================================== */}
-
-        <div className="product">
-
-          <div>
-            <h2>Make a Payment</h2>
-
-            <p>
-              Enter the amount you want to pay
-            </p>
-          </div>
-
-        </div>
-
-
-        {/* ==================================
-            AMOUNT INPUT
-        ================================== */}
-
-        <div className="amount-section">
-
-          <label htmlFor="amount">
-            Amount (₹)
-          </label>
-
-          <input
-            id="amount"
-            type="number"
-            min="1"
-            max="100000"
-            value={amount}
-            onChange={(e) =>
-              setAmount(e.target.value)
-            }
-            placeholder="Enter amount"
-          />
-
-        </div>
-
-
-        {/* ==================================
-            PAYMENT BUTTON
-        ================================== */}
-
-        <button
-          className="pay-button"
-          onClick={handlePayment}
-          disabled={loading}
-        >
-          {loading
-            ? "Opening Payment..."
-            : `Pay ₹${amount || 0}`}
-        </button>
-
-        {/* ==================================
-    DASHBOARD SUMMARY
-================================== */}
-
-<div className="summary">
-
-  <div className="summary-card">
-    <p>Total Payments</p>
-
-    <h2>
-      {
-        orders.filter(
-          (order) => order.status === "paid"
-        ).length
-      }
-    </h2>
-  </div>
-
-
-  <div className="summary-card">
-    <p>Total Paid</p>
-
-    <h2>
-      ₹
-      {
-        orders
-          .filter(
-            (order) => order.status === "paid"
-          )
-          .reduce(
-            (total, order) =>
-              total + Number(order.amount),
-            0
-          )
-      }
-    </h2>
-  </div>
-
-</div>
-
-
-        {/* ==================================
-            TRANSACTION HISTORY
-        ================================== */}
-
-        <div className="history">
-
-          <h2>
-            Transaction History
-          </h2>
-
-          {orders.length === 0 ? (
-
-            <p className="no-orders">
-              No transactions yet.
-            </p>
-
-          ) : (
-
-            orders.map((order) => (
-
-              <div
-                className="transaction"
-                key={order._id}
-              >
-
-                <div>
-
-                  <h3>
-                    MiniPay Payment
-                  </h3>
-
-                  <p>
-                    {new Date(
-                      order.createdAt
-                    ).toLocaleString()}
-                  </p>
+                        <p>
+                            No login required
+                        </p>
+                    </div>
 
                 </div>
 
+                <div className="amount-section">
 
-                <div className="transaction-right">
+                    <label htmlFor="amount">
+                        Amount (₹)
+                    </label>
 
-                  <strong>
-                    ₹{order.amount}
-                  </strong>
-
-                  <span
-                    className={
-                      order.status === "paid"
-                        ? "status paid"
-                        : "status pending"
-                    }
-                  >
-                    {order.status}
-                  </span>
+                    <input
+                        id="amount"
+                        type="number"
+                        min="1"
+                        max="100000"
+                        value={amount}
+                        onChange={(e) =>
+                            setAmount(
+                                e.target.value
+                            )
+                        }
+                        placeholder="Enter amount"
+                    />
 
                 </div>
 
-              </div>
+                <button
+                    className="pay-button"
+                    onClick={handlePayment}
+                    disabled={loading}
+                >
+                    {loading
+                        ? "Opening Payment..."
+                        : `Pay ₹${amount || 0}`}
+                </button>
 
-            ))
+                {/* SUMMARY */}
 
-          )}
+                <div className="summary">
+
+                    <div className="summary-card">
+
+                        <p>
+                            Total Payments
+                        </p>
+
+                        <h2>
+                            {
+                                orders.filter(
+                                    (order) =>
+                                        order.status ===
+                                        "paid"
+                                ).length
+                            }
+                        </h2>
+
+                    </div>
+
+                    <div className="summary-card">
+
+                        <p>
+                            Total Paid
+                        </p>
+
+                        <h2>
+                            ₹
+                            {
+                                orders
+                                    .filter(
+                                        (order) =>
+                                            order.status ===
+                                            "paid"
+                                    )
+                                    .reduce(
+                                        (
+                                            total,
+                                            order
+                                        ) =>
+                                            total +
+                                            Number(
+                                                order.amount
+                                            ),
+                                        0
+                                    )
+                            }
+                        </h2>
+
+                    </div>
+
+                </div>
+
+                {/* TRANSACTION HISTORY */}
+
+                <div className="history">
+
+                    <h2>
+                        Transaction History
+                    </h2>
+
+                    {orders.length === 0 ? (
+
+                        <p className="no-orders">
+                            No transactions yet.
+                        </p>
+
+                    ) : (
+
+                        orders.map(
+                            (order) => (
+
+                                <div
+                                    className="transaction"
+                                    key={
+                                        order._id
+                                    }
+                                >
+
+                                    <div>
+
+                                        <h3>
+                                            MiniPay Payment
+                                        </h3>
+
+                                        <p>
+                                            {
+                                                new Date(
+                                                    order.createdAt
+                                                ).toLocaleString()
+                                            }
+                                        </p>
+
+                                    </div>
+
+                                    <div className="transaction-right">
+
+                                        <strong>
+                                            ₹
+                                            {
+                                                order.amount
+                                            }
+                                        </strong>
+
+                                        <span
+                                            className={
+                                                order.status ===
+                                                "paid"
+                                                    ? "status paid"
+                                                    : "status pending"
+                                            }
+                                        >
+                                            {
+                                                order.status
+                                            }
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                            )
+                        )
+
+                    )}
+
+                </div>
+
+            </div>
 
         </div>
-
-      </div>
-
-    </div>
-  );
+    );
 }
 
 export default App;
