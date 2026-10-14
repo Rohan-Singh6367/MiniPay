@@ -92,21 +92,19 @@ function App() {
                         );
 
                         // Verify payment
-                        const verifyResponse =
-                            await axios.post(
-                                "http://localhost:5000/api/payment/verify",
-                                {
-                                    razorpay_order_id:
-                                        response.razorpay_order_id,
+                       const API_URL =
+                          import.meta.env.VITE_API_URL ||
+                           "http://localhost:5000";
 
-                                    razorpay_payment_id:
-                                        response.razorpay_payment_id,
-
-                                    razorpay_signature:
-                                        response.razorpay_signature
-                                }
-                            );
-
+// Verify payment
+const verifyResponse = await axios.post(
+    `${API_URL}/api/payment/verify`,
+    {
+        razorpay_order_id: response.razorpay_order_id,
+        razorpay_payment_id: response.razorpay_payment_id,
+        razorpay_signature: response.razorpay_signature
+    }
+);
                         console.log(
                             "Verification response:",
                             verifyResponse.data
